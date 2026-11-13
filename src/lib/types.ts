@@ -105,6 +105,8 @@ export type StockQuote = {
   currency: string;
   sparkline: number[];
   returns?: StockReturns;
+  historyStart: string | null;
+  sinceListing: number | null;
   technicalScore: number;
   fundamentalScore: number;
   technicalBadge: Badge;

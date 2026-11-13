@@ -115,6 +115,17 @@ export async function fetchStock(symbol: string): Promise<StockQuote> {
     .filter((c): c is number => typeof c === "number" && Number.isFinite(c));
 
   const lastClose = closes[closes.length - 1];
+
+  const firstDatedQuote = rawQuotes.find(
+    (quote) => quote.date instanceof Date && typeof quote.close === "number",
+  );
+  const historyStart = firstDatedQuote?.date?.toISOString().slice(0, 10) ?? null;
+  const firstClose = firstDatedQuote?.close ?? null;
+  const sinceListingPercent =
+    firstClose != null && firstClose > 0 && lastClose != null
+      ? ((lastClose - firstClose) / firstClose) * 100
+      : null;
+
   const prevClose = closes.length > 1 ? closes[closes.length - 2] : null;
   const derivedChange =
     prevClose && prevClose !== 0 ? ((lastClose - prevClose) / prevClose) * 100 : null;
@@ -222,6 +233,8 @@ export async function fetchStock(symbol: string): Promise<StockQuote> {
       y5: calcGrowth(rawQuotes, lastClose, 60),
       y10: calcGrowth(rawQuotes, lastClose, 120),
     },
+    historyStart,
+    sinceListing: sinceListingPercent,
     technicalScore: tech,
     fundamentalScore: fund,
     technicalBadge: badgeForScore(tech),

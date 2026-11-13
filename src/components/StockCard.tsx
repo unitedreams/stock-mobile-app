@@ -52,6 +52,27 @@ export function StockCard({ quote, positions, onRemove, onBuy, onSell }: StockCa
   const change = quote.changePercent;
   const hasFundamentals = quote.fundamentalDrivers.length > 0;
 
+  const startDate = quote.historyStart ? new Date(quote.historyStart) : null;
+  const startLabel =
+    startDate && !Number.isNaN(startDate.getTime())
+      ? startDate.toLocaleDateString("en-CA", { month: "short", year: "numeric" })
+      : null;
+  const missingLabel = startDate
+    ? (
+        [
+          ["5Y", 5],
+          ["10Y", 10],
+        ] as const
+      )
+        .filter(([, years]) => {
+          const boundary = new Date();
+          boundary.setFullYear(boundary.getFullYear() - years);
+          return startDate.getTime() > boundary.getTime() + 15 * 86_400_000;
+        })
+        .map(([label]) => label)
+        .join(" and ")
+    : "";
+
   const invested = positions.reduce((sum, position) => sum + position.invested, 0);
   const shares = positions.reduce((sum, position) => sum + position.shares, 0);
   const positionValue = quote.price != null ? shares * quote.price : invested;
@@ -117,6 +138,16 @@ export function StockCard({ quote, positions, onRemove, onBuy, onSell }: StockCa
         <ReturnPill label="5Y" value={quote.returns?.y5} />
         <ReturnPill label="10Y" value={quote.returns?.y10} />
       </div>
+
+      {missingLabel ? (
+        <p className="mt-1.5 text-[10px] leading-relaxed text-zinc-400">
+          {missingLabel} not available — this listing starts {startLabel}
+          {quote.sinceListing != null
+            ? `, ${formatSignedPercent(quote.sinceListing)} since then`
+            : null}
+          .
+        </p>
+      ) : null}
 
       <div className="mt-4 flex gap-4">
         <ScoreGauge
