@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
         const type = quote.quoteType ?? "";
         return type === "EQUITY" || type === "ETF";
       })
-      .map((quote) => {
+      .map((quote, index) => {
         const symbol = quote.symbol ?? "";
         const exchange = quote.exchange ?? null;
         return {
@@ -60,13 +60,24 @@ export async function GET(request: NextRequest) {
           exchange,
           quoteType: quote.quoteType ?? null,
           canadian: isCanadian(symbol, exchange),
+          index,
         };
       })
       .sort((a, b) => {
+        const needle = query.toUpperCase();
+        const exactA = a.symbol.toUpperCase() === needle ? 0 : 1;
+        const exactB = b.symbol.toUpperCase() === needle ? 0 : 1;
+        if (exactA !== exactB) return exactA - exactB;
+
+        const equityA = a.quoteType === "EQUITY" ? 0 : 1;
+        const equityB = b.quoteType === "EQUITY" ? 0 : 1;
+        if (equityA !== equityB) return equityA - equityB;
+
         if (a.canadian !== b.canadian) return a.canadian ? -1 : 1;
-        return a.symbol.localeCompare(b.symbol);
+        return a.index - b.index;
       })
-      .slice(0, 8);
+      .slice(0, 8)
+      .map(({ index: _index, ...result }) => result);
 
     return NextResponse.json({ results });
   } catch {
