@@ -160,66 +160,6 @@ function cleanup(items: RawNews[], tokens: string[], base: string): RawNews[] {
   return out;
 }
 
-const translationCache = new Map<string, { value: string; expires: number }>();
-
-// Machine translation mangles ticker symbols (BCE becomes "before common era"),
-// so swap them for placeholders and restore them afterwards.
-function protectTickers(text: string): { masked: string; saved: string[] } {
-  const saved: string[] = [];
-  const masked = text.replace(/\b[A-Z]{2,6}(?:\.[A-Z]{1,3})?\b/g, (match) => {
-    saved.push(match);
-    return `zqx${saved.length - 1}zqx`;
-  });
-  return { masked, saved };
-}
-
-function restoreTickers(text: string, saved: string[]): string {
-  let out = text;
-  saved.forEach((value, index) => {
-    out = out.replace(new RegExp(`zqx${index}zqx`, "gi"), value);
-  });
-  return out;
-}
-
-async function translateBlock(text: string): Promise<string | null> {
-  const cached = translationCache.get(text);
-  if (cached && cached.expires > Date.now()) return cached.value;
-  try {
-    const { masked, saved } = protectTickers(text);
-    const url =
-      "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=fa&dt=t&q=" +
-      encodeURIComponent(masked);
-    const response = await fetch(url, {
-      headers: { "User-Agent": USER_AGENT },
-      signal: AbortSignal.timeout(7000),
-    });
-    if (!response.ok) return null;
-    const data = (await response.json()) as unknown;
-    const segments = (data as Array<unknown>)[0];
-    if (!Array.isArray(segments)) return null;
-    const raw = segments
-      .map((segment) => (Array.isArray(segment) ? String(segment[0] ?? "") : ""))
-      .join("");
-    const value = restoreTickers(raw, saved);
-    if (!value.trim()) return null;
-    if (translationCache.size > 500) translationCache.clear();
-    translationCache.set(text, { value, expires: Date.now() + 12 * 3_600_000 });
-    return value;
-  } catch {
-    return null;
-  }
-}
-
-async function translateTitles(titles: string[]): Promise<Array<string | null>> {
-  if (titles.length === 0) return [];
-  const block = await translateBlock(titles.join("\n"));
-  if (block) {
-    const parts = block.split("\n").map((part) => part.trim());
-    if (parts.length === titles.length) return parts;
-  }
-  return Promise.all(titles.map(async (title) => (await translateBlock(title)) ?? null));
-}
-
 export async function fetchStockNews(
   symbol: string,
   name: string,
@@ -239,12 +179,8 @@ export async function fetchStockNews(
     if (fallback.length > items.length) items = fallback;
   }
 
-  const top = items.slice(0, MAX_ITEMS);
-  const translated = await translateTitles(top.map((item) => item.title));
-
-  return top.map((item, index) => ({
+  return items.slice(0, MAX_ITEMS).map((item) => ({
     title: item.title,
-    titleFa: translated[index] ?? null,
     publisher: item.publisher,
     link: item.link,
     publishedAt: item.publishedAt,

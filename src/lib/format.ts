@@ -26,3 +26,13 @@ export function formatPoints(points: number): string {
   const rounded = Math.round(points * 10) / 10;
   return `${rounded > 0 ? "+" : ""}${rounded.toFixed(1)}`;
 }
+
+export function formatSignedPercent(value: number, digits = 1): string {
+  const sign = value > 0 ? "+" : value < 0 ? "-" : "";
+  return `${sign}${Math.abs(value).toFixed(digits)}%`;
+}
+
+export function formatSignedMoney(value: number, currency: string): string {
+  const sign = value > 0 ? "+" : value < 0 ? "-" : "";
+  return `${sign}${formatPrice(Math.abs(value), currency)}`;
+}

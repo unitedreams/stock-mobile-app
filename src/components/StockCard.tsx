@@ -2,14 +2,17 @@
 
 import { useId, useState } from "react";
 import { ChevronDown, X } from "lucide-react";
-import type { StockQuote } from "@/lib/types";
-import { formatPrice } from "@/lib/format";
+import type { Position, StockQuote } from "@/lib/types";
+import { formatPrice, formatSignedPercent } from "@/lib/format";
 import { ScoreGauge } from "./ScoreGauge";
 import { StockDetails } from "./StockDetails";
 
 type StockCardProps = {
   quote: StockQuote;
+  positions: Position[];
   onRemove: (symbol: string) => void;
+  onBuy: (quote: StockQuote, amount: number) => string | null;
+  onSell: (symbol: string) => void;
 };
 
 function ReturnPill({
@@ -42,12 +45,18 @@ function ReturnPill({
   );
 }
 
-export function StockCard({ quote, onRemove }: StockCardProps) {
+export function StockCard({ quote, positions, onRemove, onBuy, onSell }: StockCardProps) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
   const up = (quote.changePercent ?? 0) >= 0;
   const change = quote.changePercent;
   const hasFundamentals = quote.fundamentalDrivers.length > 0;
+
+  const invested = positions.reduce((sum, position) => sum + position.invested, 0);
+  const shares = positions.reduce((sum, position) => sum + position.shares, 0);
+  const positionValue = quote.price != null ? shares * quote.price : invested;
+  const positionProfit = positionValue - invested;
+  const positionPercent = invested > 0 ? (positionProfit / invested) * 100 : 0;
 
   return (
     <article className="rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm">
@@ -123,6 +132,26 @@ export function StockCard({ quote, onRemove }: StockCardProps) {
         />
       </div>
 
+      {positions.length > 0 ? (
+        <div className="mt-3 flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-emerald-700/80">
+            Your position
+          </span>
+          <span className="flex items-baseline gap-1.5">
+            <span className="font-mono text-[12px] font-semibold text-zinc-900">
+              {formatPrice(positionValue, quote.currency)}
+            </span>
+            <span
+              className={`font-mono text-[11px] font-semibold ${
+                positionProfit >= 0 ? "text-emerald-600" : "text-rose-600"
+              }`}
+            >
+              {formatSignedPercent(positionPercent)}
+            </span>
+          </span>
+        </div>
+      ) : null}
+
       <div
         className={`grid transition-[grid-template-rows] duration-300 ease-out ${
           open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
@@ -130,7 +159,12 @@ export function StockCard({ quote, onRemove }: StockCardProps) {
         aria-hidden={!open}
       >
         <div id={panelId} className="overflow-hidden" inert={!open}>
-          <StockDetails quote={quote} />
+          <StockDetails
+            quote={quote}
+            positions={positions}
+            onBuy={onBuy}
+            onSell={onSell}
+          />
         </div>
       </div>
     </article>

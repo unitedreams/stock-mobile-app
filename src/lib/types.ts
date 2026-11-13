@@ -54,10 +54,25 @@ export type StockDetails = {
 
 export type StockNewsItem = {
   title: string;
-  titleFa: string | null;
   publisher: string | null;
   link: string;
   publishedAt: string | null;
+};
+
+export type Position = {
+  id: string;
+  symbol: string;
+  name: string;
+  invested: number;
+  shares: number;
+  buyPrice: number;
+  currency: string;
+  boughtAt: string;
+};
+
+export type HistoryPoint = {
+  date: string;
+  close: number;
 };
 
 export type StockMetrics = {
