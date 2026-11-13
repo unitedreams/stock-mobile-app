@@ -77,7 +77,13 @@ export async function GET(request: NextRequest) {
         return a.index - b.index;
       })
       .slice(0, 8)
-      .map(({ index: _index, ...result }) => result);
+      .map((result) => ({
+        symbol: result.symbol,
+        name: result.name,
+        exchange: result.exchange,
+        quoteType: result.quoteType,
+        canadian: result.canadian,
+      }));
 
     return NextResponse.json({ results });
   } catch {
