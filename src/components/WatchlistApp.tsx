@@ -16,13 +16,48 @@ type SearchResult = {
   canadian: boolean;
 };
 
+const ARCHIVE_QUOTE_BATCH = 10;
+
+async function fetchArchiveQuotes(symbols: string[]): Promise<StockQuote[]> {
+  const chunks: string[][] = [];
+  for (let index = 0; index < symbols.length; index += ARCHIVE_QUOTE_BATCH) {
+    chunks.push(symbols.slice(index, index + ARCHIVE_QUOTE_BATCH));
+  }
+  const responses = await Promise.all(
+    chunks.map(async (chunk) => {
+      const res = await fetch(`/api/stock?symbols=${encodeURIComponent(chunk.join(","))}`);
+      return res.ok ? ((await res.json()) as StockApiResponse) : null;
+    }),
+  );
+  const bySymbol = new Map<string, StockQuote>();
+  for (const response of responses) {
+    for (const quote of response?.quotes ?? []) bySymbol.set(quote.symbol, quote);
+  }
+  return symbols
+    .map((symbol) => bySymbol.get(symbol))
+    .filter((quote): quote is StockQuote => quote != null);
+}
+
 export function WatchlistApp() {
-  const { tickers, addTicker, addExact, removeTicker, max, hydrated } = useWatchlist();
+  const {
+    tickers,
+    archived,
+    addTicker,
+    addExact,
+    removeTicker,
+    archiveTicker,
+    restoreTicker,
+    max,
+    hydrated,
+  } = useWatchlist();
   const { positions, buy, sellAll } = usePositions();
+  const [view, setView] = useState<"watchlist" | "archive">("watchlist");
   const [input, setInput] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [quotes, setQuotes] = useState<StockQuote[]>([]);
+  const [archiveQuotes, setArchiveQuotes] = useState<StockQuote[]>([]);
   const [loading, setLoading] = useState(true);
+  const [archiveLoading, setArchiveLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -63,6 +98,44 @@ export function WatchlistApp() {
     void load(tickers);
   }, [tickers, load, hydrated]);
 
+  const loadArchive = useCallback(async (symbols: string[]) => {
+    if (symbols.length === 0) {
+      setArchiveQuotes([]);
+      return;
+    }
+    setArchiveLoading(true);
+    try {
+      setArchiveQuotes(await fetchArchiveQuotes(symbols));
+    } catch {
+      setMessage("Network error while loading archived quotes");
+    } finally {
+      setArchiveLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    let cancelled = false;
+    void (async () => {
+      if (archived.length === 0) {
+        setArchiveQuotes([]);
+        return;
+      }
+      setArchiveLoading(true);
+      try {
+        const loaded = await fetchArchiveQuotes(archived);
+        if (!cancelled) setArchiveQuotes(loaded);
+      } catch {
+        if (!cancelled) setMessage("Network error while loading archived quotes");
+      } finally {
+        if (!cancelled) setArchiveLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [archived, hydrated]);
+
   useEffect(() => {
     const query = input.trim();
     if (query.length < 2) return;
@@ -88,11 +161,24 @@ export function WatchlistApp() {
     };
   }, [input]);
 
+  const activePositions = useMemo(() => {
+    const archivedSet = new Set(archived);
+    return positions.filter((position) => !archivedSet.has(position.symbol));
+  }, [positions, archived]);
+
+  const archivedInvested = useMemo(() => {
+    const archivedSet = new Set(archived);
+    return positions.reduce(
+      (sum, position) => (archivedSet.has(position.symbol) ? sum + position.invested : sum),
+      0,
+    );
+  }, [positions, archived]);
+
   const portfolio = useMemo(() => {
     const prices = new Map(quotes.map((quote) => [quote.symbol, quote]));
     let invested = 0;
     let value = 0;
-    for (const position of positions) {
+    for (const position of activePositions) {
       invested += position.invested;
       const price = prices.get(position.symbol)?.price ?? position.buyPrice;
       value += position.shares * price;
@@ -103,9 +189,9 @@ export function WatchlistApp() {
       value,
       profit,
       percent: invested > 0 ? (profit / invested) * 100 : 0,
-      currency: positions[0]?.currency ?? "CAD",
+      currency: activePositions[0]?.currency ?? "CAD",
     };
-  }, [positions, quotes]);
+  }, [activePositions, quotes]);
 
   function commit(raw: string, exact: boolean): boolean {
     const error = exact ? addExact(raw) : addTicker(raw);
@@ -167,83 +253,123 @@ export function WatchlistApp() {
         </div>
         <button
           type="button"
-          onClick={() => void load(tickers, true)}
+          onClick={() => {
+            if (view === "archive") void loadArchive(archived);
+            else void load(tickers, true);
+          }}
           className="rounded-full border border-zinc-200 bg-white p-2.5 text-zinc-600 transition hover:border-zinc-300 hover:text-zinc-900"
           aria-label="Refresh quotes"
         >
-          <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+          <RefreshCw
+            className={`h-4 w-4 ${refreshing || archiveLoading ? "animate-spin" : ""}`}
+          />
         </button>
       </header>
 
-      <form
-        onSubmit={(event) => {
-          void onAdd(event);
-        }}
-        className="mb-4 flex gap-2"
+      <div
+        className="mb-4 grid grid-cols-2 gap-1 rounded-2xl bg-zinc-100 p-1"
+        role="tablist"
+        aria-label="Watchlist views"
       >
-        <div className="relative flex-1">
-          <Search
-            className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400"
-            aria-hidden
-          />
-          <input
-            value={input}
-            onChange={(event) => {
-              setInput(event.target.value);
-              setShowResults(true);
-            }}
-            onFocus={() => setShowResults(true)}
-            onBlur={() => {
-              closeTimer.current = setTimeout(() => setShowResults(false), 120);
-            }}
-            placeholder="Search company or ticker (e.g. Shopify, RY)"
-            aria-label="Search for a company or ticker"
-            maxLength={40}
-            className="h-12 w-full rounded-2xl border border-zinc-200 bg-white pl-10 pr-4 text-sm text-zinc-900 outline-none ring-emerald-500/0 placeholder:text-zinc-400 focus:border-emerald-500/50 focus:ring-4 focus:ring-emerald-500/10"
-          />
-          {showResults && input.trim().length >= 2 && (results.length > 0 || searching) ? (
-            <ul className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-2xl border border-zinc-200 bg-white py-1 shadow-lg">
-              {results.map((result) => (
-                <li key={result.symbol}>
-                  <button
-                    type="button"
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      if (closeTimer.current) clearTimeout(closeTimer.current);
-                      commit(result.symbol, true);
-                    }}
-                    className="flex w-full items-start justify-between gap-2 px-3 py-2 text-left transition hover:bg-zinc-50"
-                  >
-                    <span className="min-w-0">
-                      <span className="block text-[12px] font-semibold text-zinc-900">
-                        {result.symbol}
-                      </span>
-                      <span className="block truncate text-[10px] text-zinc-500">
-                        {result.name}
-                      </span>
-                    </span>
-                    {result.canadian ? (
-                      <span className="mt-0.5 shrink-0 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700">
-                        CA
-                      </span>
-                    ) : null}
-                  </button>
-                </li>
-              ))}
-              {searching && results.length === 0 ? (
-                <li className="px-3 py-2 text-[11px] text-zinc-400">Searching…</li>
-              ) : null}
-            </ul>
-          ) : null}
-        </div>
-        <button
-          type="submit"
-          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-500 text-white transition hover:bg-emerald-600"
-          aria-label="Add ticker"
+        {[
+          { key: "watchlist" as const, label: "Watchlist", count: tickers.length },
+          { key: "archive" as const, label: "Archive", count: archived.length },
+        ].map(({ key, label, count }) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={view === key}
+            onClick={() => setView(key)}
+            className={`flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition ${
+              view === key
+                ? "bg-white text-zinc-900 shadow-sm"
+                : "text-zinc-500 hover:text-zinc-800"
+            }`}
+          >
+            {label}
+            <span
+              className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                view === key ? "bg-emerald-100 text-emerald-700" : "bg-zinc-200 text-zinc-500"
+              }`}
+            >
+              {count}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {view === "watchlist" ? (
+        <form
+          onSubmit={(event) => {
+            void onAdd(event);
+          }}
+          className="mb-4 flex gap-2"
         >
-          <Plus className="h-5 w-5" />
-        </button>
-      </form>
+          <div className="relative flex-1">
+            <Search
+              className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400"
+              aria-hidden
+            />
+            <input
+              value={input}
+              onChange={(event) => {
+                setInput(event.target.value);
+                setShowResults(true);
+              }}
+              onFocus={() => setShowResults(true)}
+              onBlur={() => {
+                closeTimer.current = setTimeout(() => setShowResults(false), 120);
+              }}
+              placeholder="Search company or ticker (e.g. Shopify, RY)"
+              aria-label="Search for a company or ticker"
+              maxLength={40}
+              className="h-12 w-full rounded-2xl border border-zinc-200 bg-white pl-10 pr-4 text-sm text-zinc-900 outline-none ring-emerald-500/0 placeholder:text-zinc-400 focus:border-emerald-500/50 focus:ring-4 focus:ring-emerald-500/10"
+            />
+            {showResults && input.trim().length >= 2 && (results.length > 0 || searching) ? (
+              <ul className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-2xl border border-zinc-200 bg-white py-1 shadow-lg">
+                {results.map((result) => (
+                  <li key={result.symbol}>
+                    <button
+                      type="button"
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        if (closeTimer.current) clearTimeout(closeTimer.current);
+                        commit(result.symbol, true);
+                      }}
+                      className="flex w-full items-start justify-between gap-2 px-3 py-2 text-left transition hover:bg-zinc-50"
+                    >
+                      <span className="min-w-0">
+                        <span className="block text-[12px] font-semibold text-zinc-900">
+                          {result.symbol}
+                        </span>
+                        <span className="block truncate text-[10px] text-zinc-500">
+                          {result.name}
+                        </span>
+                      </span>
+                      {result.canadian ? (
+                        <span className="mt-0.5 shrink-0 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700">
+                          CA
+                        </span>
+                      ) : null}
+                    </button>
+                  </li>
+                ))}
+                {searching && results.length === 0 ? (
+                  <li className="px-3 py-2 text-[11px] text-zinc-400">Searching…</li>
+                ) : null}
+              </ul>
+            ) : null}
+          </div>
+          <button
+            type="submit"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-500 text-white transition hover:bg-emerald-600"
+            aria-label="Add ticker"
+          >
+            <Plus className="h-5 w-5" />
+          </button>
+        </form>
+      ) : null}
 
       {message ? (
         <p className="mb-3 rounded-2xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
@@ -251,7 +377,7 @@ export function WatchlistApp() {
         </p>
       ) : null}
 
-      {positions.length > 0 ? (
+      {activePositions.length > 0 ? (
         <div className="mb-3 rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
@@ -282,48 +408,126 @@ export function WatchlistApp() {
           <p className="mt-0.5 text-[10px] text-zinc-500">
             Invested {formatPrice(portfolio.invested, portfolio.currency)}
           </p>
+          {archivedInvested > 0 ? (
+            <p className="mt-0.5 text-[10px] text-zinc-400">
+              Archived positions excluded: {formatPrice(archivedInvested, portfolio.currency)}
+            </p>
+          ) : null}
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-3">
-        {loading && quotes.length === 0 ? tickers.map((t) => <SkeletonCard key={t} />) : null}
+      {view === "watchlist" ? (
+        <div className="flex flex-col gap-3">
+          {loading && quotes.length === 0 ? tickers.map((t) => <SkeletonCard key={t} />) : null}
 
-        {quotes.map((quote) => (
-          <StockCard
-            key={quote.symbol}
-            quote={quote}
-            positions={positions.filter((position) => position.symbol === quote.symbol)}
-            onRemove={removeTicker}
-            onBuy={buy}
-            onSell={sellAll}
-          />
-        ))}
-
-        {!loading && tickers.length === 0 ? (
-          <p className="py-16 text-center text-sm text-zinc-500">
-            Search for a company or add a ticker to start tracking.
-          </p>
-        ) : null}
-
-        {!loading &&
-          tickers
-            .filter((t) => !quotes.some((q) => q.symbol === t))
-            .map((t) => (
-              <div
-                key={t}
-                className="flex items-center justify-between rounded-3xl border border-zinc-200 bg-white px-4 py-3"
-              >
-                <span className="font-medium text-zinc-700">{t}</span>
-                <button
-                  type="button"
-                  onClick={() => removeTicker(t)}
-                  className="text-xs text-zinc-500 hover:text-zinc-900"
-                >
-                  Remove
-                </button>
-              </div>
+          {quotes
+            .filter((quote) => tickers.includes(quote.symbol))
+            .map((quote) => (
+              <StockCard
+                key={quote.symbol}
+                quote={quote}
+                positions={activePositions.filter(
+                  (position) => position.symbol === quote.symbol,
+                )}
+                onRemove={removeTicker}
+                onArchive={archiveTicker}
+                onBuy={buy}
+                onSell={sellAll}
+              />
             ))}
-      </div>
+
+          {!loading && tickers.length === 0 ? (
+            <p className="py-16 text-center text-sm text-zinc-500">
+              Search for a company or add a ticker to start tracking.
+            </p>
+          ) : null}
+
+          {!loading &&
+            tickers
+              .filter((t) => !quotes.some((q) => q.symbol === t))
+              .map((t) => (
+                <div
+                  key={t}
+                  className="flex items-center justify-between rounded-3xl border border-zinc-200 bg-white px-4 py-3"
+                >
+                  <span className="font-medium text-zinc-700">{t}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeTicker(t)}
+                    className="text-xs text-zinc-500 hover:text-zinc-900"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {archived.length === 0 ? (
+            <p className="py-16 text-center text-sm text-zinc-500">
+              Nothing archived yet. Archive a stock to keep it here and drop it from your
+              totals.
+            </p>
+          ) : null}
+
+          {archived.map((symbol) => {
+            const quote = archiveQuotes.find((item) => item.symbol === symbol);
+            const symbolPositions = positions.filter(
+              (position) => position.symbol === symbol,
+            );
+            const invested = symbolPositions.reduce(
+              (sum, position) => sum + position.invested,
+              0,
+            );
+            const shares = symbolPositions.reduce(
+              (sum, position) => sum + position.shares,
+              0,
+            );
+            const currency = quote?.currency ?? symbolPositions[0]?.currency ?? "CAD";
+            const value = quote?.price != null ? shares * quote.price : invested;
+
+            return (
+              <div
+                key={symbol}
+                className="rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-lg font-semibold tracking-tight text-zinc-900">
+                      {symbol}
+                    </p>
+                    <p className="truncate text-xs text-zinc-500">
+                      {quote?.name ?? (archiveLoading ? "Loading quote…" : "Quote unavailable")}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMessage(restoreTicker(symbol))}
+                    className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                  >
+                    Restore
+                  </button>
+                </div>
+                <div className="mt-2 flex items-end justify-between gap-3">
+                  <span className="font-mono text-sm font-medium text-zinc-800">
+                    {formatPrice(quote?.price ?? null, currency)}
+                  </span>
+                  {shares > 0 ? (
+                    <span className="text-right font-mono text-[11px] text-zinc-500">
+                      {formatPrice(value, currency)} · {shares.toFixed(4)} shares
+                    </span>
+                  ) : null}
+                </div>
+                {shares > 0 ? (
+                  <p className="mt-1 text-[10px] text-zinc-400">
+                    Position excluded from portfolio totals while archived.
+                  </p>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

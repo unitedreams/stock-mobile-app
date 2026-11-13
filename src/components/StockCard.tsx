@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
-import { ChevronDown, X } from "lucide-react";
+import { Archive, ChevronDown, X } from "lucide-react";
 import type { Position, StockQuote } from "@/lib/types";
 import { formatPrice, formatSignedPercent } from "@/lib/format";
 import { ScoreGauge } from "./ScoreGauge";
@@ -11,6 +11,7 @@ type StockCardProps = {
   quote: StockQuote;
   positions: Position[];
   onRemove: (symbol: string) => void;
+  onArchive: (symbol: string) => void;
   onBuy: (quote: StockQuote, amount: number) => string | null;
   onSell: (symbol: string) => void;
 };
@@ -48,7 +49,14 @@ function ReturnPill({
   );
 }
 
-export function StockCard({ quote, positions, onRemove, onBuy, onSell }: StockCardProps) {
+export function StockCard({
+  quote,
+  positions,
+  onRemove,
+  onArchive,
+  onBuy,
+  onSell,
+}: StockCardProps) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
   const up = (quote.changePercent ?? 0) >= 0;
@@ -116,6 +124,14 @@ export function StockCard({ quote, positions, onRemove, onBuy, onSell }: StockCa
             <ChevronDown
               className={`h-4 w-4 transition-transform duration-300 ${open ? "rotate-180" : ""}`}
             />
+          </button>
+          <button
+            type="button"
+            onClick={() => onArchive(quote.symbol)}
+            className="rounded-full p-1.5 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700"
+            aria-label={`Archive ${quote.symbol}`}
+          >
+            <Archive className="h-4 w-4" />
           </button>
           <button
             type="button"
