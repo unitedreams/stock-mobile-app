@@ -204,6 +204,7 @@ export async function fetchStock(symbol: string): Promise<StockQuote> {
 
   return {
     symbol: requestedTicker,
+    resolvedSymbol: data.resolvedTicker,
     name,
     price:
       num(live?.regularMarketPrice) ??

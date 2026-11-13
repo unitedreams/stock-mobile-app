@@ -120,8 +120,16 @@ export function StockDetails({ quote, positions, onBuy, onSell }: StockDetailsPr
     (tag): tag is string => Boolean(tag),
   );
 
+  const alias = quote.resolvedSymbol !== quote.symbol ? quote.resolvedSymbol : null;
+
   return (
     <div className="border-t border-zinc-100 pt-3">
+      {alias ? (
+        <p className="mb-2 rounded-xl bg-zinc-50 px-3 py-2 text-[10px] leading-relaxed text-zinc-500">
+          Listed as <span className="font-mono font-semibold text-zinc-700">{alias}</span> on
+          Yahoo Finance — {quote.symbol} is the TSX-style notation for this listing.
+        </p>
+      ) : null}
       {tags.length > 0 ? (
         <div className="mb-3 flex flex-wrap gap-1.5">
           {tags.map((tag, index) => (

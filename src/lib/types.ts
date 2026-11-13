@@ -98,6 +98,7 @@ export type StockReturns = {
 
 export type StockQuote = {
   symbol: string;
+  resolvedSymbol: string;
   name: string;
   price: number | null;
   changePercent: number | null;

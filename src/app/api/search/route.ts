@@ -30,63 +30,81 @@ function isCanadian(symbol: string, exchange: string | null): boolean {
   return exchange != null && CANADIAN_EXCHANGES.has(exchange);
 }
 
-export async function GET(request: NextRequest) {
-  const query = (request.nextUrl.searchParams.get("q") ?? "").trim();
-  if (query.length < 1) {
-    return NextResponse.json({ results: [] });
-  }
+function isSupported(quote: YahooQuote): boolean {
+  const symbol = quote.symbol ?? "";
+  if (!symbol || symbol.includes("^") || symbol.includes("=")) return false;
+  return quote.quoteType === "EQUITY" || quote.quoteType === "ETF";
+}
 
+// Yahoo indexes Canadian ETFs by exchange suffix: the Fidelity Global Innovators
+// ETF is FINN.NE on Cboe Canada and has no FINN.TO listing, so an exact "FINN.TO"
+// query returns nothing. Probe the other Canadian suffixes before giving up.
+function tickerVariants(query: string): string[] {
+  const value = query.toUpperCase().trim();
+  if (!/^[A-Z0-9-]{1,12}(\.[A-Z]{1,3})?$/.test(value)) return [];
+
+  const base = value.split(".")[0];
+  const variants = value.includes(".")
+    ? [`${base}.NE`, `${base}.TO`, base]
+    : [`${base}.TO`, `${base}.NE`];
+
+  return variants.filter((variant) => variant !== value).slice(0, 3);
+}
+
+async function searchQuotes(query: string): Promise<YahooQuote[]> {
   try {
     const response = await yahoo.search(query, {
       quotesCount: 15,
       newsCount: 0,
       enableFuzzyQuery: false,
     });
-
-    const results: SearchResult[] = (response.quotes ?? [])
-      .map((quote) => quote as YahooQuote)
-      .filter((quote) => {
-        const symbol = quote.symbol ?? "";
-        if (!symbol || symbol.includes("^") || symbol.includes("=")) return false;
-        const type = quote.quoteType ?? "";
-        return type === "EQUITY" || type === "ETF";
-      })
-      .map((quote, index) => {
-        const symbol = quote.symbol ?? "";
-        const exchange = quote.exchange ?? null;
-        return {
-          symbol,
-          name: quote.shortname ?? quote.longname ?? symbol,
-          exchange,
-          quoteType: quote.quoteType ?? null,
-          canadian: isCanadian(symbol, exchange),
-          index,
-        };
-      })
-      .sort((a, b) => {
-        const needle = query.toUpperCase();
-        const exactA = a.symbol.toUpperCase() === needle ? 0 : 1;
-        const exactB = b.symbol.toUpperCase() === needle ? 0 : 1;
-        if (exactA !== exactB) return exactA - exactB;
-
-        const equityA = a.quoteType === "EQUITY" ? 0 : 1;
-        const equityB = b.quoteType === "EQUITY" ? 0 : 1;
-        if (equityA !== equityB) return equityA - equityB;
-
-        if (a.canadian !== b.canadian) return a.canadian ? -1 : 1;
-        return a.index - b.index;
-      })
-      .slice(0, 8)
-      .map((result) => ({
-        symbol: result.symbol,
-        name: result.name,
-        exchange: result.exchange,
-        quoteType: result.quoteType,
-        canadian: result.canadian,
-      }));
-
-    return NextResponse.json({ results });
+    return (response.quotes ?? []).map((quote) => quote as YahooQuote).filter(isSupported);
   } catch {
+    return [];
+  }
+}
+
+function toResult(quote: YahooQuote): SearchResult {
+  const symbol = quote.symbol ?? "";
+  const exchange = quote.exchange ?? null;
+  return {
+    symbol,
+    name: quote.shortname ?? quote.longname ?? symbol,
+    exchange,
+    quoteType: quote.quoteType ?? null,
+    canadian: isCanadian(symbol, exchange),
+  };
+}
+
+export async function GET(request: NextRequest) {
+  const query = (request.nextUrl.searchParams.get("q") ?? "").trim();
+  if (query.length < 1) {
     return NextResponse.json({ results: [] });
   }
+
+  let quotes = await searchQuotes(query);
+
+  if (quotes.length === 0) {
+    const probes = await Promise.all(tickerVariants(query).map(searchQuotes));
+    quotes = probes.flat();
+  }
+
+  const results = quotes
+    .map(toResult)
+    .filter((result, index, all) => all.findIndex((item) => item.symbol === result.symbol) === index)
+    .sort((a, b) => {
+      const needle = query.toUpperCase();
+      const exactA = a.symbol.toUpperCase() === needle ? 0 : 1;
+      const exactB = b.symbol.toUpperCase() === needle ? 0 : 1;
+      if (exactA !== exactB) return exactA - exactB;
+
+      if (a.canadian !== b.canadian) return a.canadian ? -1 : 1;
+
+      const equityA = a.quoteType === "EQUITY" ? 0 : 1;
+      const equityB = b.quoteType === "EQUITY" ? 0 : 1;
+      return equityA - equityB;
+    })
+    .slice(0, 8);
+
+  return NextResponse.json({ results });
 }
