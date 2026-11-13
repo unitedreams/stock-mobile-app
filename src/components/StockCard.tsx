@@ -15,6 +15,14 @@ type StockCardProps = {
   onSell: (symbol: string) => void;
 };
 
+function formatReturn(value: number): string {
+  const wide = Math.abs(value) >= 100;
+  const rounded = wide ? Math.round(value) : Math.round(value * 10) / 10;
+  if (rounded === 0) return "0.0%";
+  const digits = wide ? Math.abs(rounded).toFixed(0) : Math.abs(rounded).toFixed(1);
+  return `${rounded > 0 ? "+" : "-"}${digits}%`;
+}
+
 function ReturnPill({
   label,
   value,
@@ -22,24 +30,19 @@ function ReturnPill({
   label: string;
   value: number | null | undefined;
 }) {
-  const isPositive = (value ?? 0) >= 0;
+  const rounded = value == null ? null : Math.round(value * 10) / 10;
+  const tone =
+    rounded == null || rounded === 0
+      ? "text-zinc-400"
+      : rounded > 0
+        ? "text-emerald-600"
+        : "text-rose-600";
+
   return (
     <div className="flex flex-col items-center rounded-xl border border-zinc-200 bg-zinc-50 py-1.5 px-1">
       <span className="text-[10px] font-medium text-zinc-500">{label}</span>
-      <span
-        className={`mt-0.5 font-mono text-[11px] font-semibold ${
-          value == null
-            ? "text-zinc-400"
-            : isPositive
-            ? "text-emerald-600"
-            : "text-rose-600"
-        }`}
-      >
-        {value == null
-          ? "—"
-          : `${isPositive ? "+" : ""}${
-              Math.abs(value) >= 100 ? value.toFixed(0) : value.toFixed(1)
-            }%`}
+      <span className={`mt-0.5 font-mono text-[11px] font-semibold ${tone}`}>
+        {value == null ? "—" : formatReturn(value)}
       </span>
     </div>
   );
