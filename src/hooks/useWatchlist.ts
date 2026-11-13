@@ -68,7 +68,7 @@ export function useWatchlist() {
   }, [archived, hydrated]);
 
   const addExact = useCallback((raw: string): string | null => {
-    const ticker = raw.trim().toUpperCase();
+    const ticker = normalize(raw);
     if (!ticker) return "Enter a ticker symbol";
     if (tickers.includes(ticker)) return `${ticker} is already on your list`;
     if (tickers.length >= MAX_WATCHLIST) return "Watchlist is limited to 10 tickers";
@@ -77,11 +77,7 @@ export function useWatchlist() {
     return null;
   }, [tickers]);
 
-  const addTicker = useCallback((raw: string): string | null => {
-    const ticker = normalize(raw);
-    if (!ticker) return "Enter a ticker symbol";
-    return addExact(ticker);
-  }, [addExact]);
+  const addTicker = useCallback((raw: string): string | null => addExact(raw), [addExact]);
 
   const removeTicker = useCallback((ticker: string) => {
     setTickers((prev) => prev.filter((item) => item !== ticker));

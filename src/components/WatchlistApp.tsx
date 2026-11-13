@@ -174,6 +174,27 @@ export function WatchlistApp() {
     );
   }, [positions, archived]);
 
+  const unlistedPositions = useMemo(() => {
+    const listed = new Set([...tickers, ...archived]);
+    const map = new Map<string, { symbol: string; invested: number; shares: number; currency: string }>();
+    for (const position of positions) {
+      if (listed.has(position.symbol)) continue;
+      const current = map.get(position.symbol);
+      if (current) {
+        current.invested += position.invested;
+        current.shares += position.shares;
+      } else {
+        map.set(position.symbol, {
+          symbol: position.symbol,
+          invested: position.invested,
+          shares: position.shares,
+          currency: position.currency,
+        });
+      }
+    }
+    return [...map.values()];
+  }, [positions, tickers, archived]);
+
   const portfolio = useMemo(() => {
     const prices = new Map(quotes.map((quote) => [quote.symbol, quote]));
     let invested = 0;
@@ -460,6 +481,41 @@ export function WatchlistApp() {
                   </button>
                 </div>
               ))}
+
+          {unlistedPositions.length > 0 ? (
+            <div className="rounded-3xl border border-dashed border-zinc-300 bg-zinc-50 p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+                Positions not in your list
+              </p>
+              <p className="mt-0.5 text-[10px] leading-relaxed text-zinc-500">
+                These paper positions still count in the portfolio totals. Restore a ticker to
+                track it again.
+              </p>
+              <div className="mt-2.5 flex flex-col gap-2">
+                {unlistedPositions.map((position) => (
+                  <div
+                    key={position.symbol}
+                    className="flex items-center justify-between gap-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-zinc-800">{position.symbol}</p>
+                      <p className="font-mono text-[10px] text-zinc-500">
+                        {formatPrice(position.invested, position.currency)} ·{" "}
+                        {position.shares.toFixed(4)} shares
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setMessage(addExact(position.symbol))}
+                      className="shrink-0 rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-50"
+                    >
+                      Restore
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : (
         <div className="flex flex-col gap-3">
