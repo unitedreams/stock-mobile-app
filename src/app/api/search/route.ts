@@ -93,10 +93,14 @@ export async function GET(request: NextRequest) {
     .map(toResult)
     .filter((result, index, all) => all.findIndex((item) => item.symbol === result.symbol) === index)
     .sort((a, b) => {
-      const needle = query.toUpperCase();
-      const exactA = a.symbol.toUpperCase() === needle ? 0 : 1;
-      const exactB = b.symbol.toUpperCase() === needle ? 0 : 1;
-      if (exactA !== exactB) return exactA - exactB;
+      const base = query.toUpperCase().split(".")[0];
+      const baseOf = (symbol: string) => symbol.toUpperCase().split(".")[0];
+
+      // Same underlying (e.g. FINN vs FINN.NE) stays grouped so the Canadian
+      // listing can win even when the plain US symbol matched exactly.
+      const sameA = baseOf(a.symbol) === base ? 0 : 1;
+      const sameB = baseOf(b.symbol) === base ? 0 : 1;
+      if (sameA !== sameB) return sameA - sameB;
 
       if (a.canadian !== b.canadian) return a.canadian ? -1 : 1;
 
